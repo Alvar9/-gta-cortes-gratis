@@ -1,0 +1,107 @@
+name: GTA - Cortes Automaticos
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Link do video autorizado'
+        required: true
+        type: string
+      confirm_rights:
+        description: 'Tenho permissao para baixar e editar'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  cortes:
+    if: ${{ inputs.confirm_rights }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Preparar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Chopify
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          git clone --depth 1 https://github.com/mehbul/chopify.git .chopify
+          python -m pip install -r .chopify/requirements.txt
+
+      - name: Encontrar melhores momentos
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+        run: |
+          python .chopify/chopify.py "$VIDEO_URL" \
+            --action prepare \
+            --whisper-model tiny \
+            --aspect 9:16 \
+            --max-clips 2 \
+            --min-len 20 \
+            --max-len 50
+
+      - name: Criar videos sem legendas
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          pasta = Path("work")
+          projeto = json.loads(
+              (pasta / "project.json").read_text()
+          )
+          trechos = json.loads(
+              (pasta / "segments.json").read_text()
+          )
+
+          if not trechos:
+              raise SystemExit("Nenhum trecho encontrado")
+
+          origem = projeto["video"]
+          Path("output").mkdir(exist_ok=True)
+
+          for numero, trecho in enumerate(trechos[:2], 1):
+              inicio = float(trecho["start"])
+              duracao = float(trecho["end"]) - inicio
+
+              if duracao <= 0:
+                  continue
+
+              destino = f"output/corte_{numero:02d}.mp4"
+
+              subprocess.run([
+                  "ffmpeg", "-y",
+                  "-ss", str(inicio),
+                  "-i", origem,
+                  "-t", str(duracao),
+                  "-map", "0:v:0",
+                  "-map", "0:a:0?",
+                  "-vf",
+                  "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+                  "-c:v", "libx264",
+                  "-preset", "veryfast",
+                  "-crf", "22",
+                  "-c:a", "aac",
+                  "-b:a", "160k",
+                  destino
+              ], check=True)
+          PY
+
+      - name: Disponibilizar MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortes-gta-mp4
+          path: output/*.mp4
+          if-no-files-found: error
+          retention-days: 7
