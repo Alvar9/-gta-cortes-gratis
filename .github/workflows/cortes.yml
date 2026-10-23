@@ -38,6 +38,10 @@ jobs:
           git clone --depth 1 https://github.com/mehbul/chopify.git .chopify
           python -m pip install -r .chopify/requirements.txt
 
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          python -m pip install -U 'yt-dlp[default]'
+
       - name: Encontrar melhores momentos
         env:
           VIDEO_URL: ${{ inputs.video_url }}
